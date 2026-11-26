@@ -1,57 +1,77 @@
+using System;
+using System.IO;
 using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
 
-namespace ProstoDesk.UsbRelay.Common;
-
-public static class StreamPump
+namespace ProstoDesk.UsbRelay.Common
 {
-    public static async Task RunDuplexAsync(TcpClient left, TcpClient right, CancellationToken cancellationToken)
+    public static class StreamPump
     {
-        using (left)
-        using (right)
-        using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+        public static async Task RunDuplexAsync(TcpClient left, TcpClient right, CancellationToken cancellationToken)
         {
-            using var leftStream = left.GetStream();
-            using var rightStream = right.GetStream();
+            if (left == null) throw new ArgumentNullException("left");
+            if (right == null) throw new ArgumentNullException("right");
 
-            var leftToRight = PumpDirectionAsync(leftStream, rightStream, right.Client, linked.Token);
-            var rightToLeft = PumpDirectionAsync(rightStream, leftStream, left.Client, linked.Token);
+            using (left)
+            using (right)
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            using (var leftStream = left.GetStream())
+            using (var rightStream = right.GetStream())
+            {
+                var leftToRight = PumpDirectionAsync(leftStream, rightStream, right.Client, linked.Token);
+                var rightToLeft = PumpDirectionAsync(rightStream, leftStream, left.Client, linked.Token);
 
-            try
-            {
-                await Task.WhenAll(leftToRight, rightToLeft).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                linked.Cancel();
-            }
-            catch (Exception ex) when (ex is IOException or SocketException)
-            {
-                linked.Cancel();
-            }
-            finally
-            {
-                try { left.Client.Shutdown(SocketShutdown.Both); } catch (SocketException) { }
-                try { right.Client.Shutdown(SocketShutdown.Both); } catch (SocketException) { }
+                try
+                {
+                    await Task.WhenAll(leftToRight, rightToLeft).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    if (!cancellationToken.IsCancellationRequested) throw;
+                    linked.Cancel();
+                }
+                catch (IOException)
+                {
+                    linked.Cancel();
+                }
+                catch (SocketException)
+                {
+                    linked.Cancel();
+                }
+                finally
+                {
+                    TryShutdown(left.Client, SocketShutdown.Both);
+                    TryShutdown(right.Client, SocketShutdown.Both);
+                }
             }
         }
-    }
 
-    private static async Task PumpDirectionAsync(
-        Stream source,
-        Stream destination,
-        Socket destinationSocket,
-        CancellationToken cancellationToken)
-    {
-        var buffer = new byte[64 * 1024];
-        while (true)
+        private static async Task PumpDirectionAsync(
+            Stream source,
+            Stream destination,
+            Socket destinationSocket,
+            CancellationToken cancellationToken)
         {
-            var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
+            var buffer = new byte[64 * 1024];
+            while (true)
             {
-                try { destinationSocket.Shutdown(SocketShutdown.Send); } catch (SocketException) { }
-                return;
+                var read = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    TryShutdown(destinationSocket, SocketShutdown.Send);
+                    return;
+                }
+
+                await destination.WriteAsync(buffer, 0, read, cancellationToken).ConfigureAwait(false);
             }
-            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+
+        private static void TryShutdown(Socket socket, SocketShutdown how)
+        {
+            try { socket.Shutdown(how); }
+            catch (SocketException) { }
+            catch (ObjectDisposedException) { }
         }
     }
 }
