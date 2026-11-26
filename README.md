@@ -4,6 +4,14 @@ Experimental USB device redirection for ProstoDesk.
 
 Goal: a USB device physically connected to the remote ProstoDesk client should appear on the controller PC as a normal local USB device. The first target is printer/MFP service software that needs vendor-specific USB commands, not ordinary remote printing.
 
+## Runtime compatibility
+
+**ProstoDesk USB Relay targets .NET Framework 4.8 (`net48`) to match ProstoDesk Classic.**
+
+A modern .NET SDK may be used as a compiler on a build machine, but the produced Host/Controller/Common binaries run on the .NET Framework 4.8 CLR and do **not** require .NET 10 on the client PC.
+
+The projects use `Microsoft.NETFramework.ReferenceAssemblies.net48 1.0.3` for reproducible builds.
+
 ## Current MVP
 
 The repository contains a buildable transport/orchestration prototype:
@@ -26,13 +34,11 @@ Production ProstoDesk will replace the LAB TCP hop with an authenticated/encrypt
 
 ## Build
 
-Requires .NET SDK 10:
-
 ```powershell
 dotnet build ProstoDesk.UsbRelay.slnx -c Release
 ```
 
-No NuGet dependencies are used by the MVP.
+The build output is under `bin\Release\net48`.
 
 ## LAB test (LAN only)
 
