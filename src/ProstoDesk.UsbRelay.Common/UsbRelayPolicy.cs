@@ -1,12 +1,23 @@
-namespace ProstoDesk.UsbRelay.Common;
+using System;
 
-public static class UsbRelayPolicy
+namespace ProstoDesk.UsbRelay.Common
 {
-    public static bool RequiresExplicitUserConsent(UsbDeviceInfo device) => true;
-
-    public static bool LooksLikeSensitiveInputDevice(UsbDeviceInfo device)
+    public static class UsbRelayPolicy
     {
-        var d = device.Description.ToLowerInvariant();
-        return d.Contains("keyboard") || d.Contains("mouse") || d.Contains("hid") || d.Contains("input device");
+        public static bool RequiresExplicitUserConsent(UsbDeviceInfo device)
+        {
+            if (device == null) throw new ArgumentNullException("device");
+            return true;
+        }
+
+        public static bool LooksLikeSensitiveInputDevice(UsbDeviceInfo device)
+        {
+            if (device == null) throw new ArgumentNullException("device");
+            var description = (device.Description ?? string.Empty).ToLowerInvariant();
+            return description.Contains("keyboard") ||
+                   description.Contains("mouse") ||
+                   description.Contains("hid") ||
+                   description.Contains("input device");
+        }
     }
 }
