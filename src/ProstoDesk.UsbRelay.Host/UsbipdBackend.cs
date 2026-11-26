@@ -1,75 +1,147 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
-using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using ProstoDesk.UsbRelay.Common;
 
-namespace ProstoDesk.UsbRelay.Host;
-
-internal sealed class UsbipdBackend
+namespace ProstoDesk.UsbRelay.Host
 {
-    private readonly string _exe;
-
-    public UsbipdBackend(string exe = "usbipd") => _exe = exe;
-
-    public async Task<IReadOnlyList<UsbDeviceInfo>> GetDevicesAsync(CancellationToken ct)
+    internal sealed class UsbipdBackend
     {
-        var result = await RunAsync(["state"], ct).ConfigureAwait(false);
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException($"usbipd state failed ({result.ExitCode}): {result.StdErr}");
+        private readonly string _exe;
 
-        using var json = JsonDocument.Parse(result.StdOut);
-        var devices = new List<UsbDeviceInfo>();
-        if (!json.RootElement.TryGetProperty("Devices", out var array) || array.ValueKind != JsonValueKind.Array)
-            return devices;
-
-        foreach (var d in array.EnumerateArray())
+        public UsbipdBackend(string exe)
         {
-            string? GetString(string name) => d.TryGetProperty(name, out var p) && p.ValueKind != JsonValueKind.Null ? p.GetString() : null;
-            bool GetBool(string name) => d.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.True;
-            Guid? guid = Guid.TryParse(GetString("PersistedGuid"), out var g) ? g : null;
-            var instanceId = GetString("InstanceId") ?? string.Empty;
-            var (vid, pid) = UsbDeviceInfo.ParseVidPid(instanceId);
-            devices.Add(new UsbDeviceInfo(
-                GetString("BusId"),
-                GetString("Description") ?? "Unknown USB device",
-                instanceId,
-                GetBool("IsForced"),
-                guid,
-                GetString("StubInstanceId"),
-                GetString("ClientIPAddress"),
-                vid,
-                pid));
+            _exe = string.IsNullOrWhiteSpace(exe) ? "usbipd" : exe;
         }
-        return devices;
-    }
 
-    public Task<ProcessResult> BindAsync(string busId, bool force, CancellationToken ct)
-    {
-        var args = new List<string> { "bind", "--busid", busId };
-        if (force) args.Add("--force");
-        return RunAsync(args, ct);
-    }
+        public UsbipdBackend() : this("usbipd") { }
 
-    public Task<ProcessResult> UnbindAsync(string busId, CancellationToken ct) =>
-        RunAsync(["unbind", "--busid", busId], ct);
-
-    private async Task<ProcessResult> RunAsync(IEnumerable<string> args, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo
+        public async Task<IReadOnlyList<UsbDeviceInfo>> GetDevicesAsync(CancellationToken cancellationToken)
         {
-            FileName = _exe,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
+            var result = await RunAsync(new[] { "state" }, cancellationToken).ConfigureAwait(false);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException(string.Format("usbipd state failed ({0}): {1}", result.ExitCode, result.StdErr));
 
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Could not start {_exe}.");
-        var stdout = process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct).ConfigureAwait(false);
-        return new ProcessResult(process.ExitCode, await stdout.ConfigureAwait(false), await stderr.ConfigureAwait(false));
+            var serializer = new JavaScriptSerializer();
+            var state = serializer.Deserialize<UsbipdState>(result.StdOut) ?? new UsbipdState();
+            var devices = new List<UsbDeviceInfo>();
+
+            foreach (var item in state.Devices ?? new UsbipdStateDevice[0])
+            {
+                Guid parsedGuid;
+                Guid? guid = Guid.TryParse(item.PersistedGuid, out parsedGuid) ? parsedGuid : (Guid?)null;
+                string vid;
+                string pid;
+                UsbDeviceInfo.ParseVidPid(item.InstanceId, out vid, out pid);
+
+                devices.Add(new UsbDeviceInfo(
+                    item.BusId,
+                    string.IsNullOrEmpty(item.Description) ? "Unknown USB device" : item.Description,
+                    item.InstanceId ?? string.Empty,
+                    item.IsForced,
+                    guid,
+                    item.StubInstanceId,
+                    item.ClientIPAddress,
+                    vid,
+                    pid));
+            }
+
+            return devices;
+        }
+
+        public Task<ProcessResult> BindAsync(string busId, bool force, CancellationToken cancellationToken)
+        {
+            var args = new List<string> { "bind", "--busid", busId };
+            if (force) args.Add("--force");
+            return RunAsync(args, cancellationToken);
+        }
+
+        public Task<ProcessResult> UnbindAsync(string busId, CancellationToken cancellationToken)
+        {
+            return RunAsync(new[] { "unbind", "--busid", busId }, cancellationToken);
+        }
+
+        private async Task<ProcessResult> RunAsync(IEnumerable<string> args, CancellationToken cancellationToken)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = _exe,
+                Arguments = BuildArguments(args),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using (var process = new Process { StartInfo = psi })
+            {
+                if (!process.Start())
+                    throw new InvalidOperationException("Could not start " + _exe + ".");
+
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+
+                using (cancellationToken.Register(delegate
+                {
+                    try { if (!process.HasExited) process.Kill(); }
+                    catch (InvalidOperationException) { }
+                }))
+                {
+                    await Task.Run(delegate { process.WaitForExit(); }, cancellationToken).ConfigureAwait(false);
+                }
+
+                var stdout = await stdoutTask.ConfigureAwait(false);
+                var stderr = await stderrTask.ConfigureAwait(false);
+                return new ProcessResult(process.ExitCode, stdout, stderr);
+            }
+        }
+
+        private static string BuildArguments(IEnumerable<string> args)
+        {
+            var result = new List<string>();
+            foreach (var arg in args)
+                result.Add(QuoteArgument(arg));
+            return string.Join(" ", result.ToArray());
+        }
+
+        private static string QuoteArgument(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "\"\"";
+            if (value.IndexOfAny(new[] { ' ', '\t', '\"' }) < 0) return value;
+            return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        }
+
+        internal sealed class ProcessResult
+        {
+            public ProcessResult(int exitCode, string stdOut, string stdErr)
+            {
+                ExitCode = exitCode;
+                StdOut = stdOut;
+                StdErr = stdErr;
+            }
+
+            public int ExitCode { get; private set; }
+            public string StdOut { get; private set; }
+            public string StdErr { get; private set; }
+        }
+
+        private sealed class UsbipdState
+        {
+            public UsbipdStateDevice[] Devices { get; set; }
+        }
+
+        private sealed class UsbipdStateDevice
+        {
+            public string BusId { get; set; }
+            public string Description { get; set; }
+            public string InstanceId { get; set; }
+            public bool IsForced { get; set; }
+            public string PersistedGuid { get; set; }
+            public string StubInstanceId { get; set; }
+            public string ClientIPAddress { get; set; }
+        }
     }
-
-    internal sealed record ProcessResult(int ExitCode, string StdOut, string StdErr);
 }
