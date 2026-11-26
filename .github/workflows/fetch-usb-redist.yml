@@ -1,0 +1,43 @@
+name: fetch-usb-redist
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download official installers and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p redist
+          curl -L --fail --retry 3             -o redist/usbipd-win_5.3.0_x64.msi             https://github.com/dorssel/usbipd-win/releases/download/v5.3.0/usbipd-win_5.3.0_x64.msi
+          echo "1c984914aec944de19b64eff232421439629699f8138e3ddc29301175bc6d938  redist/usbipd-win_5.3.0_x64.msi" | sha256sum -c -
+
+          curl -L --fail --retry 3             -o redist/USBip-0.9.8.1-x64.exe             https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.8.1/USBip-0.9.8.1-x64.exe
+          echo "38cad6d4432b52d5bb9409d9ad03b72fdffc4ada4cd3a48fbeca1a2752a8518a  redist/USBip-0.9.8.1-x64.exe" | sha256sum -c -
+
+          curl -L --fail --retry 3             -o redist/usbipd-win-v5.3.0-source.zip             https://github.com/dorssel/usbipd-win/archive/refs/tags/v5.3.0.zip
+
+          cat > redist/SHA256SUMS.txt <<'EOF'
+1c984914aec944de19b64eff232421439629699f8138e3ddc29301175bc6d938  usbipd-win_5.3.0_x64.msi
+38cad6d4432b52d5bb9409d9ad03b72fdffc4ada4cd3a48fbeca1a2752a8518a  USBip-0.9.8.1-x64.exe
+EOF
+
+          cat > redist/README.txt <<'EOF'
+Unmodified upstream redistribution payloads for ProstoDesk USB Relay Preview.
+usbipd-win 5.3.0: GPL-3.0, official release MSI plus corresponding source archive.
+usbip-win2 0.9.8.1: BSD-2-Clause, official signed x64 installer.
+Hashes are verified before the artifact is created.
+EOF
+
+      - name: Upload verified redistributables
+        uses: actions/upload-artifact@v4
+        with:
+          name: prostodesk-usb-redist
+          path: redist/
+          if-no-files-found: error
+          retention-days: 7
