@@ -1,0 +1,12 @@
+{
+  "usbipd-win": {
+    "repository": "dorssel/usbipd-win",
+    "testedBaseline": "5.3.0",
+    "role": "Windows USB/IP host/exporter"
+  },
+  "usbip-win2": {
+    "repository": "vadimgrn/usbip-win2",
+    "testedBaseline": "0.9.8.1",
+    "role": "Windows USB/IP client/virtual host controller"
+  }
+}
