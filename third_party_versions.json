@@ -1,0 +1,16 @@
+{
+  "usbipd-win": {
+    "repository": "dorssel/usbipd-win",
+    "testedBaseline": "5.3.0",
+    "role": "Windows USB/IP host/exporter",
+    "x64Installer": "usbipd-win_5.3.0_x64.msi",
+    "sha256": "1c984914aec944de19b64eff232421439629699f8138e3ddc29301175bc6d938"
+  },
+  "usbip-win2": {
+    "repository": "vadimgrn/usbip-win2",
+    "testedBaseline": "0.9.8.1",
+    "role": "Windows USB/IP client/virtual host controller",
+    "x64Installer": "USBip-0.9.8.1-x64.exe",
+    "sha256": "38cad6d4432b52d5bb9409d9ad03b72fdffc4ada4cd3a48fbeca1a2752a8518a"
+  }
+}
