@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ProstoDesk.UsbRelay.Common/ProstoDesk.UsbRelay.Common.csproj" />
+    <Project Path="src/ProstoDesk.UsbRelay.Controller/ProstoDesk.UsbRelay.Controller.csproj" />
+    <Project Path="src/ProstoDesk.UsbRelay.Host/ProstoDesk.UsbRelay.Host.csproj" />
+  </Folder>
+</Solution>
